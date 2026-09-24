@@ -124,7 +124,8 @@ Em produção viria do catálogo — ver ADR-014.
 - [ ] `status` inválido no filtro devolve 400.
 - [ ] Ordenação estável (`created_at, id`), servida por índice.
 
-**Limitação assumida.** Paginação por offset degrada em página alta — ADR-010.
+**Decisão de projeto.** Paginação por offset, com o índice `(created_at, id)` já
+preparado para cursor quando o volume pedir — ADR-010.
 
 ---
 

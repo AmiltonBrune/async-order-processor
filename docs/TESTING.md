@@ -556,5 +556,5 @@ para descobrir que alguém importou `typeorm` dentro do domínio.
   custa mais do que entrega.
 - **Migrations aplicadas em banco com dados legados.** Não existe legado aqui; a
   estratégia de migração sem downtime está respondida no `RESPOSTAS.md`.
-- **Carga e throughput.** Não sei onde o relay satura, e não vou fingir que sei.
-  Está declarado como limitação conhecida (ARCHITECTURE §17).
+- **Carga e throughput.** Medidos por fora da suíte Jest, com k6 — quatro
+  cenários e os números obtidos estão em `load/README.md`.

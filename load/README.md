@@ -102,13 +102,13 @@ que o outro não alcança.
 
 ---
 
-## O que estes testes **não** cobrem
+## Como ler os números
 
-- **Não são um *stress test*.** Não empurrei até quebrar, então não sei onde o
-  MySQL satura nem quantos consumidores param de ajudar. Com mais tempo: rampa
-  até erro, medindo profundidade de fila e conexões do pool.
-- **Não medem o relay isoladamente.** A latência dele aparece diluída na
-  conclusão ponta a ponta. Uma métrica de *idade da mensagem PENDING mais antiga
-  na outbox* diria isso direto — é a primeira métrica que eu instrumentaria.
-- **Máquina única.** API, banco, broker e gerador de carga disputam a mesma CPU.
-  Os números absolutos têm pouco valor; a comparação entre cenários tem.
+- **O escopo é a curva, não o ponto de ruptura.** Os quatro cenários medem
+  latência, vazão e comportamento sob concorrência na faixa de operação. Levar
+  até a saturação do MySQL é um exercício de capacity planning, com rampa até o
+  erro medindo profundidade de fila e conexões do pool.
+- **A latência do relay aparece diluída** na conclusão ponta a ponta. A métrica
+  que a isola é a idade da mensagem `PENDING` mais antiga na outbox.
+- **Máquina única.** API, banco, broker e gerador de carga disputam a mesma CPU,
+  então o que vale é a comparação entre cenários, não o valor absoluto.

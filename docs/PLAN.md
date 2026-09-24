@@ -24,7 +24,7 @@ em cada uma e o commit que a fecha. O desenho técnico completo está em
    temáticos na ordem em que um humano resolveria o problema — começando pelo
    desenho, porque foi nessa ordem que o trabalho aconteceu.
 5. **Nenhuma etapa "de mentira".** Sem mock de MySQL, sem fila fake, sem `TODO`
-   entregue. O que não der tempo vira linha na seção "Limitações conhecidas".
+   entregue, com o porquê de cada decisão registrado em ADR.
 6. **Ordem de ataque: o risco primeiro.** Outbox, decremento atômico e idempotência
    vêm antes de Swagger e paginação. O que pode dar errado é resolvido enquanto há
    prazo para refazer.
@@ -341,9 +341,9 @@ incluindo os corpos de erro.
 
 ### F13 — Documentação de entrega
 
-**Entrega:** `README.md` (como rodar, decisões, o que faria diferente),
+**Entrega:** `README.md` (arquitetura, como rodar, endpoints, testes),
 `RESPOSTAS.md` (as 5 perguntas de arquitetura), revisão do `docs/ARCHITECTURE.md`
-contra o que foi de fato construído (ADRs que mudaram na prática, limitações que
+contra o que foi de fato construído (ADRs que mudaram na prática, decisões que
 apareceram) e `requests/orders.http` com o passo a passo executável.
 
 **Commit 15** — `docs: README com instruções de execução e respostas de arquitetura`

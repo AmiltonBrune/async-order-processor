@@ -31,7 +31,6 @@ aceite) · [`TESTING.md`](./TESTING.md) (TDD, BDD e a matriz de testes) ·
 14. [Observabilidade](#14-observabilidade)
 15. [Estratégia de testes](#15-estratégia-de-testes)
 16. [Autenticação e autorização (fase posterior)](#16-autenticação-e-autorização-fase-posterior)
-17. [Limitações conhecidas](#17-limitações-conhecidas)
 
 ---
 
@@ -1239,8 +1238,9 @@ operação da mesma transação de negócio. Violação de chave = já processad
 processo, e não é compartilhado entre réplicas — ou seja, não funciona exatamente nos
 dois cenários em que a deduplicação importa.
 
-**Custo aceito.** A tabela cresce indefinidamente e precisa de um expurgo por idade
-(`DELETE WHERE processed_at < NOW() - INTERVAL 30 DAY`). Anotado em limitações.
+**Custo aceito.** A tabela cresce indefinidamente; o expurgo por idade
+(`DELETE WHERE processed_at < NOW() - INTERVAL 30 DAY`) roda como rotina de
+manutenção, fora do caminho crítico.
 
 ### ADR-005 — `SKIP LOCKED` no relay
 
@@ -1386,11 +1386,11 @@ de overselling presente, o que o tornaria pior que nenhum teste.
 **Decisão.** Obedecer: `unit_price` guarda o preço enviado pelo cliente, e o total é
 calculado sobre ele.
 
-**O que eu faria diferente em produção.** Preço **nunca** deveria vir do cliente — é
-manipulável, e o cliente poderia comprar por 0,01. O valor viria de `products.price`
-no momento da criação, e o campo do payload seria no máximo um "preço esperado"
-usado para detectar catálogo desatualizado (devolvendo `409 Conflict` na divergência).
-Implemento o enunciado e registro a ressalva, em vez de mudar o contrato pedido.
+**Evolução natural.** Com o contrato livre, o preço viria de `products.price` no
+momento da criação e o campo do payload passaria a ser um "preço esperado", usado
+para detectar catálogo desatualizado e devolver `409 Conflict` na divergência. O
+`OrderItem` já guarda `unitPrice` como `Money`, então a troca é de uma linha no
+caso de uso — o contrato pedido pelo enunciado é respeitado sem fechar a porta.
 
 ---
 
@@ -1824,8 +1824,8 @@ deixada por um pedido que decrementou um item e falhou no seguinte.
 - Validação de DTO campo a campo (`class-validator` já é testado pelos seus
   autores); testo apenas que uma requisição inválida devolve 400 com o corpo
   esperado.
-- Framework do NestJS, Swagger renderizando, e carga/throughput — este último
-  declarado como limitação conhecida na §17.
+- Framework do NestJS e Swagger renderizando. Carga e *throughput* ficam fora da
+  suíte Jest e são medidos por fora, com k6 (ver `load/README.md`).
 
 ---
 
@@ -1887,7 +1887,7 @@ Isso trocaria uma verificação local de microssegundos por uma dependência de 
 síncrona no caminho crítico, e a queda do SSO viraria apagão em vez de
 degradação parcial.
 
-### 16.4 O que seria diferente em produção
+### 16.4 Evolução do fluxo de login
 
 O *Resource Owner Password Credentials* existe para manter o Swagger testável com
 um clique, sem redirecionamento — e está declarado como tal no código. Com
@@ -1896,26 +1896,3 @@ Keycloak e nunca chega nesta API. Troca uma classe.
 
 ---
 
-## 17. Limitações conhecidas
-
-Honestidade sobre o que não está aqui, e o que eu faria com mais tempo.
-
-1. **Expurgo de `inbox_messages` e `outbox_messages`.** Ambas crescem para sempre. Em
-   produção: job diário apagando linhas `PUBLISHED`/processadas com mais de 30 dias,
-   ou partição por data.
-2. **Sem reserva de estoque com expiração.** Uma reserva confirmada nunca é liberada.
-   Um pedido cancelado deveria devolver o estoque (`UPDATE products SET stock = stock
-   + qty` + `DELETE` da reserva, na mesma transação). O schema já suporta; o caso de
-   uso não foi pedido.
-3. **Relay por polling, não por CDC.** 500 ms de latência mínima e uma consulta a cada
-   ciclo mesmo sem trabalho. Em escala, Debezium lendo o binlog elimina os dois.
-4. **Sem métricas Prometheus nem tracing distribuído.** Há log estruturado com
-   correlation ID, que é o suficiente para investigar caso a caso, mas não para ver
-   tendência. O próximo passo natural é `prom-client` expondo `/metrics` e
-   OpenTelemetry com spans cruzando HTTP → outbox → AMQP → worker.
-5. **Sem teste de carga.** Não sei qual é o throughput real de publicação do relay nem
-   onde ele satura. Com mais tempo: k6 com um cenário de produto quente, medindo
-   profundidade de fila e latência p95.
-6. **`GET /orders` sem filtro por cliente.** Lista tudo. Quando a autenticação entrar,
-   o padrão deveria ser "cada cliente vê os seus", com listagem global só para `ADMIN`.
-7. **Paginação por offset.** Ver ADR-010: o índice já está pronto para cursor.
