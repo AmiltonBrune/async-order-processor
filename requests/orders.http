@@ -1,0 +1,123 @@
+### Async Order Processor — roteiro executável
+### VS Code: extensão "REST Client". JetBrains: nativo.
+### Pré-requisito: docker compose up -d --wait
+
+@host = http://localhost:3000
+
+### 1. Login como cliente
+# @name login
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "email": "cliente@loja.test", "password": "cliente123" }
+
+### Guarda o token da resposta acima
+@token = {{login.response.body.accessToken}}
+
+### 2. Criar pedido — responde 201 PENDING na hora, sem falar com o broker
+# @name criar
+POST {{host}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+x-correlation-id: 11111111-1111-7111-8111-111111111111
+
+{
+  "customerName": "Ana Souza",
+  "items": [
+    { "productName": "Teclado Mecanico", "quantity": 2, "price": "249.90" },
+    { "productName": "Mouse Sem Fio",    "quantity": 3, "price": "89.90"  }
+  ]
+}
+
+@pedido = {{criar.response.body.id}}
+
+### 3. Consultar — segundos depois, status PROCESSED
+GET {{host}}/orders/{{pedido}}
+Authorization: Bearer {{token}}
+
+### 4. Listar com paginação
+GET {{host}}/orders?page=1&limit=5
+Authorization: Bearer {{token}}
+
+### 5. Filtrar só os que falharam
+GET {{host}}/orders?status=FAILED&page=1&limit=10
+Authorization: Bearer {{token}}
+
+### 6. CENÁRIO DE FALHA — estoque insuficiente
+### O catálogo nasce com 5 unidades. Este pedido é aceito com 201 PENDING
+### e o worker o reprova com "estoque insuficiente", sem tocar no estoque.
+POST {{host}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "customerName": "Cliente Ambicioso",
+  "items": [{ "productName": "Headset Gamer", "quantity": 99, "price": "319.50" }]
+}
+
+### 7. CENÁRIO DE FALHA — gatilho do enunciado
+### "fail" no nome dispara erro transitório: 4 tentativas, 3 degraus de espera
+### (5s, 15s, 45s) e depois dead-letter. O pedido termina FAILED com
+### RETRIES_EXHAUSTED e a mensagem real do erro salva. Leva ~65 s.
+# @name pedidoQueFalha
+POST {{host}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "customerName": "Cliente fail teste",
+  "items": [{ "productName": "Webcam Full HD", "quantity": 1, "price": "199.99" }]
+}
+
+@falhado = {{pedidoQueFalha.response.body.id}}
+
+### 8. Confira a dead-letter na UI: http://localhost:15672 (orders/orders)
+GET {{host}}/orders/{{falhado}}
+Authorization: Bearer {{token}}
+
+### 9. Entrada inválida — 400 antes de tocar no banco
+POST {{host}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "customerName": "Ana", "items": [] }
+
+### 10. Produto fora do catálogo — 422, não 404: a rota existe
+POST {{host}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "customerName": "Ana Souza",
+  "items": [{ "productName": "Produto Fantasma", "quantity": 1, "price": "10.00" }]
+}
+
+### 11. Reprocessar exige ADMIN — como cliente, 403
+POST {{host}}/orders/{{falhado}}/reprocess
+Authorization: Bearer {{token}}
+
+### 12. Login como operador
+# @name loginAdmin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@loja.test", "password": "admin123" }
+
+@tokenAdmin = {{loginAdmin.response.body.accessToken}}
+
+### 13. Reprocessar o pedido FAILED — 202, volta para PENDING com event_id novo
+POST {{host}}/orders/{{falhado}}/reprocess
+Authorization: Bearer {{tokenAdmin}}
+
+### 14. Reprocessar de novo um pedido que não está mais FAILED — 409
+POST {{host}}/orders/{{falhado}}/reprocess
+Authorization: Bearer {{tokenAdmin}}
+
+### 15. Sem token — 401
+GET {{host}}/orders
+
+### 16. Rotas públicas
+GET {{host}}/health/ready
+
+###
+GET {{host}}/health/live
