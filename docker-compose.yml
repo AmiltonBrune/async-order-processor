@@ -1,0 +1,97 @@
+name: async-order-processor
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_USER: orders
+  DB_PASSWORD: orders
+  DB_NAME: orders
+  DB_POOL_SIZE: "20"
+  AMQP_URL: amqp://orders:orders@rabbitmq:5672
+  JWT_SECRET: ${JWT_SECRET:-troque-este-segredo-em-producao}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=caching_sha2_password
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: orders
+      MYSQL_USER: orders
+      MYSQL_PASSWORD: orders
+    ports: ["${MYSQL_PORT:-3306}:3306"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uorders", "-porders"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes: ["mysql-data:/var/lib/mysql"]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: orders
+      RABBITMQ_DEFAULT_PASS: orders
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Roda as migrations e sai. Os tres papeis dependem da conclusao dela, entao
+  # nenhum processo sobe contra um schema que ainda nao existe.
+  migrate:
+    build: .
+    environment:
+      <<: *app-env
+      APP_ROLE: api
+    command: ["npx", "typeorm-ts-node-commonjs", "migration:run", "-d", "dist/infrastructure/persistence/datasource/cli.datasource.js"]
+    entrypoint: ["node", "-e", "require('./dist/infrastructure/persistence/datasource/cli.datasource').default.initialize().then(ds => ds.runMigrations()).then(() => { process.exit(0); }).catch(e => { console.error(e); process.exit(1); })"]
+    depends_on:
+      mysql: { condition: service_healthy }
+
+  api:
+    build: .
+    environment:
+      <<: *app-env
+      APP_ROLE: api
+      HTTP_PORT: "3000"
+    ports: ["${HTTP_PORT:-3000}:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  relay:
+    build: .
+    environment:
+      <<: *app-env
+      APP_ROLE: relay
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+
+  consumer:
+    build: .
+    environment:
+      <<: *app-env
+      APP_ROLE: consumer
+    # Escala horizontal: `docker compose up -d --scale consumer=3` e o teste de
+    # que a protecao contra overselling nao depende de haver um worker so.
+    deploy:
+      replicas: ${CONSUMER_REPLICAS:-1}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+
+volumes:
+  mysql-data:

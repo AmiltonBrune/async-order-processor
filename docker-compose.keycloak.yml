@@ -1,0 +1,46 @@
+# Sobreposição que troca a autenticação local por Keycloak.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.keycloak.yml up -d --wait
+#
+# Arquivo separado, e não um `profile`, porque não basta subir um container: os
+# três papéis precisam trocar de adaptador (`AUTH_PROVIDER`). Manter isso num
+# override deixa o caminho padrão rápido — quem só quer rodar o sistema não paga
+# os ~30 s de subida do Keycloak.
+
+x-keycloak-env: &keycloak-env
+  AUTH_PROVIDER: keycloak
+  KEYCLOAK_ISSUER: http://keycloak:8080/realms/loja
+  KEYCLOAK_CLIENT_ID: async-order-processor
+  KEYCLOAK_CLIENT_SECRET: segredo-de-desenvolvimento-trocar-em-producao
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./docker/keycloak/realm-loja.json:/opt/keycloak/data/import/realm-loja.json:ro
+    ports: ["${KEYCLOAK_PORT:-8081}:8080"]
+    healthcheck:
+      # A imagem não traz curl; o endpoint de health fica na porta de management.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  api:
+    environment: *keycloak-env
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+  relay:
+    environment: *keycloak-env
+
+  consumer:
+    environment: *keycloak-env
