@@ -5,6 +5,9 @@
   "license": "MIT",
   "private": true,
   "scripts": {
+    "setup": "./setup.sh",
+    "setup:keycloak": "./setup.sh keycloak",
+    "setup:reset": "./setup.sh --reset",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",

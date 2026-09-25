@@ -328,6 +328,7 @@ src/
 ├── app.module.ts                    # composition root: liga todas as camadas
 └── readiness.module.ts              # monta as sondas de MySQL e RabbitMQ
 
+setup.sh                             # sobe a stack e prova o fluxo de ponta a ponta
 features/                            # especificacao executavel em Gherkin (pt)
 └── *.feature                        # 8 arquivos, 82 casos — ver USER_STORIES.md
 

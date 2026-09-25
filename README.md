@@ -22,17 +22,20 @@ flowchart LR
         CONSUMER["<b>consumer</b><br/>processa o pedido"]
     end
 
+    IDP["Provedor de identidade<br/>local ou Keycloak"]
     DB[("MySQL 8<br/>fonte da verdade")]
     MQ{{"RabbitMQ"}}
 
-    CLI -->|"POST /orders"| API
-    API -->|"1 · pedido + evento<br/>na MESMA transação"| DB
+    CLI -->|"0 · POST /auth/login"| API
+    API <-.->|"confere credencial<br/>e valida o token"| IDP
+    CLI -->|"1 · POST /orders<br/>+ Bearer token"| API
+    API -->|"2 · pedido + evento<br/>na MESMA transação"| DB
     API -.->|"201 PENDING"| CLI
 
-    RELAY -->|"2 · lê a outbox com<br/>FOR UPDATE SKIP LOCKED"| DB
-    RELAY -->|"3 · publica order.created"| MQ
-    MQ -->|"4 · entrega"| CONSUMER
-    CONSUMER -->|"5 · inbox, decremento<br/>atômico e reserva"| DB
+    RELAY -->|"3 · lê a outbox com<br/>FOR UPDATE SKIP LOCKED"| DB
+    RELAY -->|"4 · publica order.created"| MQ
+    MQ -->|"5 · entrega"| CONSUMER
+    CONSUMER -->|"6 · inbox, decremento<br/>atômico e reserva"| DB
 
     MQ -.->|"retry 5s · 15s · 45s<br/>depois dead-letter"| MQ
     CLI -->|"GET /orders/ID"| API
@@ -48,6 +51,40 @@ arquitetura que persegue também o caminho transitivo.
 | `api` | Recebe HTTP, grava pedido + evento na mesma transação, expõe consulta e Swagger | horizontal |
 | `relay` | Lê `outbox_messages` e publica no RabbitMQ | horizontal, sem disputa (`SKIP LOCKED`) |
 | `consumer` | Consome `order.created`, decrementa estoque e grava a reserva | `--scale consumer=N` |
+
+### Identidade
+
+Toda rota de pedido exige `Bearer` token. Quem confere a senha e quem atesta o
+token são **duas portas do domínio**, e `AUTH_PROVIDER` escolhe o adaptador —
+nenhum caso de uso, controller ou guard sabe qual está no ar.
+
+```mermaid
+flowchart LR
+    LOGIN["LoginUseCase"] --> P1{{"CredentialsAuthenticator"}}
+    GUARD["JwtAuthGuard"] --> P2{{"TokenVerifier"}}
+
+    P1 --> L1["LocalCredentialsAuthenticator<br/>tabela users + scrypt"]
+    P1 --> K1["KeycloakCredentialsAuthenticator<br/>password grant no realm"]
+    P2 --> L2["LocalJwtVerifier<br/>HS256, segredo compartilhado"]
+    P2 --> K2["KeycloakJwksVerifier<br/>RS256, chave pública do JWKS"]
+```
+
+| | `local` (padrão) | `keycloak` |
+|---|---|---|
+| Assinatura do token | HS256, emitida por nós | RS256, emitida pelo realm |
+| Papéis | coluna `users.role` | claim `realm_access.roles` |
+| `created_by` do pedido | id da tabela `users` | `sub` do realm |
+| Sobe em | instantâneo | ~30 s (container do Keycloak) |
+
+Os papéis do realm passam por uma *allowlist* antes de virarem papel do
+domínio: claim que não está prevista é ignorada, não propagada.
+
+Validar token **não chama o provedor**: a chave pública vem do JWKS uma vez e
+fica em cache com TTL, limite de renovação por `kid` e reuso da chave anterior
+se a renovação falhar. Se o Keycloak cair, quem já tem token continua
+trabalhando — só o login novo para. Um `kid` desconhecido dispara no máximo uma
+busca por janela, para que token forjado não use esta API como amplificador de
+DDoS contra o Keycloak.
 
 ### Estados do pedido
 
@@ -84,14 +121,41 @@ O desenho completo — C4, ERD, diagramas de sequência e 18 ADRs — está em
 
 ## Como rodar
 
-**Pré-requisito:** Docker com Compose v2. Nada além disso.
+**Pré-requisito:** Docker com Compose v2. Nada além disso — nem Node, nem `.env`.
 
 ```bash
-docker compose up -d --wait
+git clone git@github.com:AmiltonBrune/async-order-processor.git
+cd async-order-processor
+./setup.sh
 ```
 
-Sobe MySQL, RabbitMQ, roda as migrations e inicia os três papéis. O `--wait` só
-retorna quando todos os *health checks* estão verdes.
+O script confere os pré-requisitos, avisa se alguma porta está ocupada, sobe
+tudo, espera os *health checks*, e então **prova que funcionou**: faz login,
+cria um pedido e espera o worker concluí-lo. Se qualquer passo falhar, ele diz
+qual foi e o comando para investigar.
+
+```
+1/5  Pré-requisitos          ✓ docker · compose · daemon · portas livres
+2/5  Subindo a stack          ✓ todos os contêineres saudáveis
+3/5  Banco                    ✓ 8 tabelas, 5 produtos no catálogo
+4/5  Provando que funciona    ✓ login → pedido → PROCESSED
+5/5  Pronto                   → http://localhost:3000/docs
+```
+
+| Comando | O que faz |
+|---|---|
+| `./setup.sh` | autenticação local — rápido, sem dependência externa |
+| `./setup.sh keycloak` | autenticação via Keycloak, com o realm já importado |
+| `./setup.sh --reset` | apaga os volumes antes de subir, para voltar ao estado de fábrica |
+
+### Ou na mão, se preferir
+
+```bash
+docker compose up -d --wait                                        # local
+docker compose -f docker-compose.yml -f docker-compose.keycloak.yml up -d --wait   # keycloak
+```
+
+### Endereços
 
 | Endereço | O que é |
 |---|---|
@@ -101,8 +165,19 @@ retorna quando todos os *health checks* estão verdes.
 | http://localhost:3000/metrics | Métricas Prometheus da API |
 | http://localhost:3001/metrics | Métricas Prometheus do relay |
 | http://localhost:15672 | UI do RabbitMQ (`orders` / `orders`) |
+| http://localhost:8081 | Keycloak, só no modo `keycloak` (`admin` / `admin`) |
 
-Para parar:
+### Credenciais
+
+Semeadas por migration no modo local, e importadas no realm no modo Keycloak —
+**as mesmas nos dois**:
+
+| Usuário | Senha | Papel | Libera |
+|---|---|---|---|
+| `cliente@loja.test` | `cliente123` | `CUSTOMER` | criar e consultar os próprios pedidos |
+| `admin@loja.test` | `admin123` | `ADMIN` | tudo, incluindo `POST /orders/{id}/reprocess` |
+
+### Parar
 
 ```bash
 docker compose down        # mantém os dados
@@ -217,33 +292,6 @@ principais:
 
 Portas do MySQL e do RabbitMQ também são configuráveis (`MYSQL_PORT`,
 `RABBITMQ_PORT`, `RABBITMQ_UI_PORT`).
-
----
-
-## Autenticação
-
-Dois provedores atrás das mesmas portas (`TokenVerifier` e
-`CredentialsAuthenticator`). `AUTH_PROVIDER` escolhe qual sobe; nenhum caso de
-uso, controller ou guard sabe qual está ativo.
-
-| | `local` (padrão) | `keycloak` |
-|---|---|---|
-| Emissão | tabela `users` + scrypt, JWT **HS256** | *password grant* no Keycloak, JWT **RS256** |
-| Verificação | segredo compartilhado | chave pública do **JWKS**, em cache |
-| Papéis | coluna `users.role` | claim `realm_access.roles`, filtrado por allowlist |
-| Tempo de subida | instantâneo | ~30 s (container do Keycloak) |
-
-```bash
-docker compose up -d --wait     # local
-npm run keycloak:up             # com Keycloak (console em http://localhost:8081, admin/admin)
-```
-
-As credenciais e o fluxo do Swagger são idênticos nos dois modos.
-
-A validação do token **não chama o provedor**: a chave pública vem do JWKS uma
-vez e fica em cache com TTL, limite de renovação por `kid` e reuso da chave
-anterior se a renovação falhar. Um `kid` desconhecido dispara no máximo uma
-busca por janela.
 
 ---
 
