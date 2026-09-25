@@ -98,6 +98,8 @@ retorna quando todos os *health checks* estão verdes.
 | http://localhost:3000/docs | **Swagger — todos os endpoints testáveis pelo navegador** |
 | http://localhost:3000/health/ready | Readiness (verifica MySQL e RabbitMQ) |
 | http://localhost:3000/health/live | Liveness |
+| http://localhost:3000/metrics | Métricas Prometheus da API |
+| http://localhost:3001/metrics | Métricas Prometheus do relay |
 | http://localhost:15672 | UI do RabbitMQ (`orders` / `orders`) |
 
 Para parar:
@@ -181,9 +183,15 @@ instante.
 | `POST` | `/orders/{id}/reprocess` | `ADMIN` | Reenfileira um pedido `FAILED`, responde `202` |
 | `GET` | `/health/live` | público | O processo está vivo |
 | `GET` | `/health/ready` | público | MySQL e RabbitMQ acessíveis; `503` se não |
+| `GET` | `/metrics` | público | Exposição Prometheus do processo |
 
 Credenciais semeadas: `cliente@loja.test` / `cliente123` (papel `CUSTOMER`) e
 `admin@loja.test` / `admin123` (papel `ADMIN`).
+
+**Cada cliente vê apenas os próprios pedidos.** `GET /orders` filtra pela
+identidade do token e `GET /orders/{id}` responde `404` — não `403` — para o
+pedido de outra pessoa, porque um `403` confirmaria que o id existe. O papel
+`ADMIN` enxerga todos.
 
 Valores monetários trafegam como **string decimal** no JSON, nunca como número.
 
@@ -203,6 +211,7 @@ principais:
 | `RETRY_TIERS_MS` | `5000,15000,45000` | Degraus de espera; três degraus = três retentativas |
 | `PROCESSING_DELAY_MS` | `1500` | *Sleep* que representa a validação de estoque |
 | `OUTBOX_POLL_INTERVAL_MS` | `500` | Intervalo do ciclo do relay |
+| `RETENTION_DAYS` | `30` | Dias de histórico mantidos em `outbox_messages` e `inbox_messages` |
 | `AUTH_PROVIDER` | `local` | Provedor de identidade: `local` ou `keycloak` |
 | `LOG_LEVEL` | `info` | Nível do log estruturado |
 
@@ -240,55 +249,120 @@ busca por janela.
 
 ## Testes
 
+A suíte tem cinco níveis. Os dois primeiros rodam em segundos, sem Docker; os
+outros três precisam de MySQL e RabbitMQ de verdade.
+
+### Sem Docker — o loop de desenvolvimento
+
 ```bash
 npm install
-npm run test:fast                                  # arquitetura + unitários, sem Docker (~7 s)
-
-docker compose -f docker-compose.test.yml up -d --wait
-npm run test:all                                   # tudo, contra MySQL e RabbitMQ reais
+npm run test:fast          # arquitetura + unitários, ~7 s
 ```
 
-| Comando | Roda | Testes | Docker |
+### Com Docker — a suíte inteira
+
+```bash
+docker compose -f docker-compose.test.yml up -d --wait   # MySQL + RabbitMQ de teste
+npm run test:all                                          # 710 testes
+```
+
+Se a stack principal já estiver de pé (`docker compose up -d --wait`), ela serve
+igual — `docker-compose.test.yml` existe para não misturar os dados de quem está
+explorando a API com os de quem está rodando teste.
+
+### Cada nível separadamente
+
+| Comando | O que roda | Testes | Docker |
 |---|---|---:|:---:|
-| `npm run test:arch` | fitness functions de arquitetura | 57 | não |
-| `npm run test:unit` | unitários | 452 | não |
-| `npm run test:fast` | as duas acima | 509 | não |
-| `npm run test:bdd` | cenários Gherkin | 111 | sim |
-| `npm run test:int` | integração técnica | 43 | sim |
+| `npm run test:arch` | fitness functions: fronteiras entre camadas, ciclos de import, nomenclatura, invariantes | 57 | não |
+| `npm run test:unit` | unitários, sem I/O | 483 | não |
+| `npm run test:fast` | as duas acima | 540 | não |
+| `npm run test:bdd` | cenários Gherkin contra a aplicação de pé | 114 | sim |
+| `npm run test:int` | integração técnica: repositórios, schema, topologia AMQP, shutdown | 49 | sim |
 | `npm run test:concurrency` | paralelismo real com barreira de largada | 7 | sim |
-| `npm run test:all` | tudo, na ordem da pirâmide | **670** | sim |
-| `npm run test:cov` | cobertura | — | sim |
-| `npm run test:mutation` | mutation testing (Stryker) | — | sim |
-| `npm run load:smoke` · `load:create` · `load:e2e` · `load:oversell` | carga com k6, por fora, via HTTP | 4 cenários | sim |
+| `npm run test:all` | tudo, na ordem da pirâmide | **710** | sim |
+
+### Cobertura e mutação
+
+```bash
+npm run test:cov           # cobertura, com os pisos aplicados
+npm run test:mutation      # Stryker: ~4 min
+```
 
 | Métrica | Piso | Medido |
 |---|---:|---:|
 | Statements · Linhas · Funções | 100% | **100%** |
-| Branches | 85% | **85,6%** |
+| Branches | 85% | **85,3%** |
 | Mutation score (domínio + aplicação) | 95% | **100%** |
 
-A especificação executável são **13 arquivos `.feature` com 72 cenários**, todos
-rastreáveis a uma das 13 user stories. `autenticacao.feature` roda duas vezes,
-uma por provedor de identidade.
+O mutation testing existe porque cobertura mede linha executada, não asserção
+feita: o Stryker estraga o código de propósito, um ponto por vez, e verifica se
+algum teste quebra. Zero mutantes sobreviventes.
+
+### O que está escrito em Gherkin
+
+**13 arquivos `.feature`, 75 cenários**, todos rastreáveis a uma das 13 user
+stories. `autenticacao.feature` roda duas vezes, uma por provedor de identidade.
 
 ---
 
-## Desempenho medido
+## Testes de carga
 
-Números obtidos com a stack em containers numa máquina local. Metodologia e
-limites em [`load/README.md`](./load/README.md).
+Precisam do [k6](https://k6.io/docs/get-started/installation/) instalado e da
+stack de pé (`docker compose up -d --wait`).
+
+```bash
+npm run load:smoke        # sanidade: a instrumentação mede o que deveria
+npm run load:create       # carga no POST /orders — o caminho síncrono
+npm run load:e2e          # pedido até PROCESSED — atravessa outbox, fila e worker
+npm run load:oversell     # 40 pedidos simultâneos contra estoque 5
+npm run load:stress       # rampa até a saturação
+```
+
+Todos, menos o smoke, repõem o ambiente antes de rodar (`load/prep.sh`): limpar
+só o banco não basta, porque as mensagens já publicadas continuam no RabbitMQ e
+a rodada mediria fila represada em vez de latência.
+
+### Ajustando a carga
+
+```bash
+VUS=100 HOLD=60s k6 run load/k6/create-order.js
+STAGES=50,100,200,400 STAGE_DURATION=30s k6 run load/k6/stress.js
+BASE_URL=http://outra-maquina:3000 k6 run load/k6/smoke.js
+```
+
+### Números medidos
+
+Máquina local, stack em containers. Metodologia em
+[`load/README.md`](./load/README.md).
 
 | Cenário | Resultado |
 |---|---|
-| `POST /orders` | 216 req/s, p95 203 ms, 0 erro em 15.184 requisições |
+| `POST /orders` (30 VUs) | 216 req/s, p95 203 ms, 0 erro em 15.184 requisições |
 | Pedido até `PROCESSED` | 1,93 s em média (*sleep* de 1,5 s + ciclo do relay) |
 | Vazão do worker | 6,4 /s com 1 consumidor · 14,1 /s com 3 |
-| 40 pedidos HTTP simultâneos, estoque 5 | 5 `PROCESSED`, 35 `FAILED`, 0 preso |
+| 40 pedidos simultâneos, estoque 5 | 5 `PROCESSED`, 35 `FAILED`, 0 preso |
+
+**Onde satura.** A rampa mostra vazão constante e latência crescendo linear com
+a concorrência — o sistema enfileira em vez de falhar:
+
+| VUs | p95 | Vazão | Erro |
+|---:|---:|---:|---:|
+| 25 | 85 ms | 379 req/s | 0% |
+| 50 | 163 ms | 374 req/s | 0% |
+| 100 | 316 ms | 397 req/s | 0% |
+| 200 | 587 ms | 412 req/s | 0% |
+| 400 | 1,2 s | 397 req/s | 0% |
+| 800 | 2,4 s | 390 req/s | 0% |
+| 1500 | 4,1 s | 397 req/s | 0% |
+
+A saturação é de **vazão, em ~400 req/s, alcançada já com 25 VUs**. Acima disso
+a concorrência extra vira latência e nada mais: nenhum erro até 1500 VUs, nenhum
+esgotamento do pool de conexões, nenhuma requisição recusada.
 
 Com o worker saturado, o tempo até a conclusão subiu de 2 s para 26 s enquanto o
-`POST` permaneceu em 80 ms.
-
----
+`POST` permaneceu em 80 ms — que é a prova de que a fila é real e não uma
+chamada síncrona disfarçada.
 
 ## Observabilidade
 
@@ -323,6 +397,30 @@ Senha, token e o header `authorization` são redigidos na origem.
 
 ---
 
+### Métricas Prometheus
+
+Cada papel expõe `/metrics` no próprio processo, porque cada um tem números
+diferentes. Prometheus raspa os três.
+
+| Endereço | Papel | O que publica |
+|---|---|---|
+| http://localhost:3000/metrics | `api` | `orders_created_total`, `http_request_duration_seconds` |
+| http://localhost:3001/metrics | `relay` | `outbox_pending_messages`, `outbox_oldest_pending_seconds` |
+| `consumer:3000/metrics` (rede do compose) | `consumer` | `orders_processed_total{outcome}` |
+
+```bash
+curl -s localhost:3000/metrics | grep orders_created_total
+curl -s localhost:3001/metrics | grep outbox_
+```
+
+As gauges da outbox só são registradas no papel `relay` — é ele quem as
+alimenta. Registrá-las em todo processo faria a API publicar
+`outbox_pending_messages 0` para sempre: uma série que parece saudável e nunca
+foi medida.
+
+O consumidor não publica porta no host de propósito: com
+`--scale consumer=3` um mapeamento fixo colidiria.
+
 ## Estrutura de pastas
 
 ```
@@ -353,5 +451,5 @@ As fronteiras entre camadas são verificadas por `test/architecture/` e pelo lin
 | [`docs/TESTING.md`](./docs/TESTING.md) | Os cinco níveis e a matriz de qual teste prova qual coisa |
 | [`docs/PLAN.md`](./docs/PLAN.md) | Ordem de execução, fase a fase |
 | [`RESPOSTAS.md`](./RESPOSTAS.md) | As cinco perguntas de arquitetura do enunciado |
-| [`features/`](./features/) | 13 arquivos Gherkin em português, 72 cenários |
+| [`features/`](./features/) | 13 arquivos Gherkin em português, 75 cenários |
 | [`load/README.md`](./load/README.md) | Testes de carga com k6: metodologia, números e limites |

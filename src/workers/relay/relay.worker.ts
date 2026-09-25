@@ -7,23 +7,33 @@ import { RetryPolicy } from '../../domain/shared/retry-policy';
 import { Env } from '../../infrastructure/config/env.schema';
 import { OrderPublisher } from '../../infrastructure/messaging/orders/order.publisher';
 import { CorrelationContext } from '../../infrastructure/observability/correlation.context';
+import { METRICS } from '../../infrastructure/observability/metrics.constants';
+import { PrometheusMetrics } from '../../infrastructure/observability/prometheus.metrics';
 import { StructuredLogger } from '../../infrastructure/observability/pino.logger';
+import { InboxRetentionRepository } from '../../infrastructure/persistence/inbox/inbox-retention.repository';
 import {
   OutboxDispatchRepository,
   PendingMessage,
 } from '../../infrastructure/persistence/outbox/outbox-dispatch.repository';
+import { OutboxRetentionRepository } from '../../infrastructure/persistence/outbox/outbox-retention.repository';
 
 @Injectable()
 export class RelayWorker implements OnApplicationShutdown {
+  private static readonly INTERVALO_DE_EXPURGO_MS = 60 * 60 * 1000;
+
   private running = false;
   private loop: Promise<void> | null = null;
+  private proximoExpurgoEm = 0;
 
   constructor(
     private readonly outbox: OutboxDispatchRepository,
+    private readonly outboxRetention: OutboxRetentionRepository,
+    private readonly inboxRetention: InboxRetentionRepository,
     private readonly publisher: OrderPublisher,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ENV) private readonly env: Env,
     @Inject(LOGGER) private readonly logger: StructuredLogger,
+    @Inject(METRICS) private readonly metrics: PrometheusMetrics,
   ) {}
 
   start(): void {
@@ -81,10 +91,46 @@ export class RelayWorker implements OnApplicationShutdown {
     while (this.running) {
       try {
         await this.drainOnce();
+        await this.publicarMetricasDaOutbox();
+        await this.expurgarSeChegouAHora();
       } catch (error) {
         this.logger.error('Ciclo do relay falhou', { motivo: RetryPolicy.reasonOf(error) });
       }
       await this.sleep(this.env.outboxPollIntervalMs);
+    }
+  }
+
+  /**
+   * As gauges saem daqui, e não de uma consulta no scrape do Prometheus: o
+   * relay já está de pé a cada ciclo, e assim a coleta não adiciona carga ao
+   * banco proporcional ao número de scrapers.
+   */
+  private async publicarMetricasDaOutbox(): Promise<void> {
+    const { pendentes, idadeDaMaisAntigaSegundos } = await this.outbox.pendingStats(
+      this.clock.now(),
+    );
+    this.metrics.registrarOutbox(pendentes, idadeDaMaisAntigaSegundos);
+  }
+
+  /**
+   * O expurgo mora no relay porque ele já é o processo de manutenção da outbox,
+   * e roda uma vez por hora — não a cada ciclo de 500 ms, que transformaria uma
+   * limpeza de rotina em carga constante no banco.
+   */
+  async expurgarSeChegouAHora(): Promise<void> {
+    const agora = this.clock.now().getTime();
+    if (agora < this.proximoExpurgoEm) return;
+    this.proximoExpurgoEm = agora + RelayWorker.INTERVALO_DE_EXPURGO_MS;
+
+    const corte = new Date(agora - this.env.retentionDays * 24 * 60 * 60 * 1000);
+    const outbox = await this.outboxRetention.purgePublishedBefore(corte);
+    const inbox = await this.inboxRetention.purgeProcessedBefore(corte);
+    if (outbox + inbox > 0) {
+      this.logger.log('Expurgo de histórico concluído', {
+        corte: corte.toISOString(),
+        outbox,
+        inbox,
+      });
     }
   }
 

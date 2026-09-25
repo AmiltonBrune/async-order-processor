@@ -75,7 +75,15 @@ const ALLOWED_SUFFIXES: ReadonlyArray<readonly [prefix: string, suffixes: readon
   ],
   [
     'infrastructure/observability',
-    ['.logger.ts', '.interceptor.ts', '.context.ts', '.constants.ts', '.module.ts', 'index.ts'],
+    [
+      '.logger.ts',
+      '.interceptor.ts',
+      '.context.ts',
+      '.metrics.ts',
+      '.constants.ts',
+      '.module.ts',
+      'index.ts',
+    ],
   ],
   [
     'infrastructure/config',

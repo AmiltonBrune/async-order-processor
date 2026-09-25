@@ -31,6 +31,7 @@ export class CreateOrderUseCase {
       const order = Order.create({
         id: this.ids.next(),
         customerName: command.customerName,
+        createdBy: command.createdBy,
         items,
         correlationId: command.correlationId,
         now,

@@ -33,6 +33,7 @@ interface ProductRow {
 interface OrderRow {
   id: string;
   customerName: string;
+  createdBy: string;
   status: OrderStatus;
   total: string;
   items: Array<{ productId: number; productName: string; unitPrice: string; quantity: number }>;
@@ -85,6 +86,7 @@ export class InMemoryDatabase {
   seedOrder(overrides: Partial<OrderRow> & { id: string }): OrderRow {
     const row: OrderRow = {
       customerName: 'Ana Souza',
+      createdBy: 'cliente@loja.test',
       status: OrderStatus.PENDING,
       total: '20.00',
       items: [{ productId: 1, productName: 'Teclado', unitPrice: '10.00', quantity: 2 }],
@@ -127,6 +129,7 @@ const toOrder = (row: OrderRow): Order =>
   Order.restore({
     id: row.id,
     customerName: row.customerName,
+    createdBy: row.createdBy,
     status: row.status,
     total: Money.of(row.total),
     items: row.items.map(
@@ -148,6 +151,7 @@ export class InMemoryOrderRepository implements OrderRepository {
     this.db.orders.push({
       id: order.id,
       customerName: order.customerName,
+      createdBy: order.createdBy,
       status: order.status,
       total: order.total.toFixed2(),
       items: order.items.map((item) => ({
@@ -172,7 +176,9 @@ export class InMemoryOrderRepository implements OrderRepository {
 
   async list(filter: ListOrdersFilter): Promise<Page<Order>> {
     const matching = this.db.orders.filter(
-      (order) => filter.status === undefined || order.status === filter.status,
+      (order) =>
+        (filter.status === undefined || order.status === filter.status) &&
+        (filter.createdBy === undefined || order.createdBy === filter.createdBy),
     );
     const offset = (filter.page - 1) * filter.limit;
     return {

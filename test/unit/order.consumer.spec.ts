@@ -4,6 +4,7 @@ import { OrderCreatedEvent } from '../../src/domain/order/events/order-created.e
 import { BusinessRuleViolation, TransientError } from '../../src/domain/shared/errors';
 import { Env } from '../../src/infrastructure/config/env.schema';
 import { OrderConsumer } from '../../src/infrastructure/messaging/orders/order.consumer';
+import { PrometheusMetrics } from '../../src/infrastructure/observability/prometheus.metrics';
 import { StructuredLogger } from '../../src/infrastructure/observability/pino.logger';
 
 const montar = (opcoes: { tiers?: number[] } = {}) => {
@@ -36,6 +37,7 @@ const montar = (opcoes: { tiers?: number[] } = {}) => {
     processOrder as never,
     env,
     new StructuredLogger('silent', 'test'),
+    new PrometheusMetrics(),
   );
   return { canal, publisher, processOrder, consumer };
 };

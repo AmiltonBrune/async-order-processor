@@ -326,6 +326,10 @@ Linhas com ⏳ ainda não foram escritas — é o backlog do TDD, na ordem das f
 | `amqp.topology.spec.ts` | a topologia declarada (exchanges, filas, TTL, DLX) bate com a §8 | fila de retry devolvendo para a fila errada |
 | `correlation.context.spec.ts` | `AsyncLocalStorage` mantém o id através de `await` e de callback do AMQP | correlationId sumindo no worker, que é justamente onde ele importa |
 | `correlation-id.interceptor.spec.ts` | aceita `x-correlation-id` do cliente, gera quando ausente, devolve no header | id gerado novo a cada camada, quebrando a linha do tempo |
+| `relay.worker.spec.ts` (expurgo) | o corte usa o prazo de retenção configurado; não repete antes da hora | expurgo rodando a cada ciclo de 500 ms e virando carga constante no banco |
+| `prometheus.metrics.spec.ts` | contadores, histograma em segundos e gauges de último valor; registry isolado por instância | duração publicada em milissegundos num histograma declarado em segundos; gauge somando em vez de substituir |
+| `metrics.controller.spec.ts` | `/metrics` devolve o texto do registry no formato de exposição | endpoint publicando um registry vazio, com o Prometheus raspando nada sem erro |
+| `requester.decorator.spec.ts` | ADMIN recebe escopo nulo, cliente recebe o próprio subject, requisição sem identidade é 401 | cliente listando os pedidos de todo mundo; rota sem identidade caindo em "vê tudo" em vez de 401 |
 | `correlation-id.decorator.spec.ts` | o id vem do request; sem header, sem headers ou header não-texto devolve vazio | controller inventando um correlationId novo a cada chamada, quebrando o rastro de ponta a ponta |
 | `http-exception.filter.spec.ts` | corpo de erro padronizado por classe de exceção; 500 não vaza stack | `BusinessRuleViolation` virando 500 |
 | `http-exception.filter.extra.spec.ts` | corpo em string, status sem código próprio, log só em 5xx, `correlationId` no corpo | ruído de log em erro do cliente; 5xx sem stack registrada; erro sem id para investigar |
@@ -447,21 +451,21 @@ existir.
 | Nível | Arquivos | Testes | Verde |
 |---|---:|---:|:---:|
 | Arquitetura | 5 | 57 | ✅ |
-| Unitário | 54 | 452 | ✅ |
-| BDD / aceitação | 12 | 111 | ✅ |
-| Integração técnica | 6 | 43 | ✅ |
+| Unitário | 57 | 483 | ✅ |
+| BDD / aceitação | 12 | 114 | ✅ |
+| Integração técnica | 6 | 49 | ✅ |
 | Concorrência | 4 | 7 | ✅ |
-| **Total (Jest)** | **81** | **670** | ✅ |
+| **Total (Jest)** | **84** | **710** | ✅ |
 | Carga (k6) | 4 cenários | por fora, via HTTP | ✅ |
 
-**13 arquivos `.feature`, 70 cenários**, todos rastreáveis a uma das 13 user
+**13 arquivos `.feature`, 75 cenários**, todos rastreáveis a uma das 13 user
 stories. `autenticacao.feature` conta uma vez aqui e roda **duas** — uma por
 provedor de identidade.
 
 | Cobertura | Exigido | Medido |
 |---|---:|---:|
 | Statements · Linhas · Funções | **100%** | **100%** |
-| Branches | 85% (piso) | 85,61% — todos os autorais |
+| Branches | 85% (piso) | 85,3% — todos os autorais |
 | **Mutation score** (domínio + aplicação) | 95% (piso) | **100%** — 221 mutantes, zero sobreviventes |
 
 ### Por que também há mutation testing

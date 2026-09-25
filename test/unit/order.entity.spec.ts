@@ -10,6 +10,7 @@ const novoPedido = (): Order =>
   Order.create({
     id: 'order-1',
     customerName: 'Ana Souza',
+    createdBy: 'cliente@loja.test',
     items: [new OrderItem(1, 'Teclado', Money.of('10.00'), 2)],
     correlationId: 'corr-1',
     now: AGORA,
@@ -19,6 +20,7 @@ const pedidoNoStatus = (status: OrderStatus): Order =>
   Order.restore({
     id: 'order-1',
     customerName: 'Ana Souza',
+    createdBy: 'cliente@loja.test',
     status,
     total: Money.of('20.00'),
     items: [new OrderItem(1, 'Teclado', Money.of('10.00'), 2)],
@@ -47,12 +49,13 @@ describe('Order', () => {
   // delegar o cálculo.
   it('recusa nascer sem item ou sem cliente, cada uma com a sua razão', () => {
     expect(() =>
-      Order.create({ id: 'x', customerName: 'Ana', items: [], correlationId: 'c', now: AGORA }),
+      Order.create({ id: 'x', customerName: 'Ana', createdBy: 'cliente@loja.test', items: [], correlationId: 'c', now: AGORA }),
     ).toThrow(/^Pedido precisa de pelo menos um item$/);
     expect(() =>
       Order.create({
         id: 'x',
         customerName: '   ',
+        createdBy: 'cliente@loja.test',
         items: [new OrderItem(1, 'Teclado', Money.of('10.00'), 1)],
         correlationId: 'c',
         now: AGORA,

@@ -17,6 +17,7 @@ const montar = () => {
 
 const comando = {
   customerName: 'Ana Souza',
+  createdBy: 'cliente@loja.test',
   items: [
     { productName: 'Teclado', price: '10.00', quantity: 2 },
     { productName: 'Mouse', price: '3.33', quantity: 3 },
@@ -128,6 +129,7 @@ describe('CreateOrderUseCase', () => {
     const erro: unknown = await useCase
       .execute({
         customerName: 'Ana Souza',
+        createdBy: 'cliente@loja.test',
         items: [
           { productName: 'Teclado', price: '10.00', quantity: 1 },
           { productName: 'Teclado', price: '10.00', quantity: 2 },

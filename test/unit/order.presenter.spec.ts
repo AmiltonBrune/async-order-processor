@@ -8,6 +8,7 @@ const pedido = (overrides: Partial<Parameters<typeof Order.restore>[0]> = {}): O
   Order.restore({
     id: 'order-1',
     customerName: 'Ana Souza',
+    createdBy: 'cliente@loja.test',
     status: OrderStatus.PENDING,
     total: Money.of('29.99'),
     items: [

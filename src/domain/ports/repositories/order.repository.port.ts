@@ -8,6 +8,7 @@ export interface ListOrdersFilter {
   readonly page: number;
   readonly limit: number;
   readonly status?: OrderStatus;
+  readonly createdBy?: string;
 }
 
 export interface OrderRepository {

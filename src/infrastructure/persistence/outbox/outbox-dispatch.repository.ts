@@ -17,6 +17,25 @@ export class OutboxDispatchRepository {
 
   constructor(private readonly dataSource: DataSource) {}
 
+  /** Alimenta as gauges do Prometheus: quanto falta drenar e há quanto tempo. */
+  async pendingStats(now: Date): Promise<{ pendentes: number; idadeDaMaisAntigaSegundos: number }> {
+    const repositorio = this.dataSource.getRepository(OutboxEntity);
+    // A mais antiga vem PRIMEIRO. Perguntar a contagem antes obrigaria a um
+    // fallback para o caso de a linha ser publicada entre as duas consultas —
+    // um ramo que nenhum teste alcança porque depende de uma corrida.
+    const maisAntiga = await repositorio.findOne({
+      where: { status: 'PENDING' },
+      order: { id: 'ASC' },
+    });
+    if (maisAntiga === null) return { pendentes: 0, idadeDaMaisAntigaSegundos: 0 };
+
+    const pendentes = await repositorio.count({ where: { status: 'PENDING' } });
+    return {
+      pendentes,
+      idadeDaMaisAntigaSegundos: Math.max(0, (now.getTime() - maisAntiga.createdAt.getTime()) / 1000),
+    };
+  }
+
   async claimBatch(batchSize: number, now: Date): Promise<readonly PendingMessage[]> {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();

@@ -22,6 +22,8 @@ export interface Env {
   readonly outboxPollIntervalMs: number;
   readonly outboxBatchSize: number;
   readonly maxPublishAttempts: number;
+  /** Dias de histórico mantidos em outbox_messages e inbox_messages. */
+  readonly retentionDays: number;
   readonly jwtSecret: string;
   readonly jwtExpiresInSeconds: number;
   readonly authProvider: AuthProvider;
@@ -134,6 +136,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     outboxPollIntervalMs: reader.integer('OUTBOX_POLL_INTERVAL_MS', 500),
     outboxBatchSize: reader.integer('OUTBOX_BATCH_SIZE', 50),
     maxPublishAttempts: reader.integer('MAX_PUBLISH_ATTEMPTS', 10),
+    retentionDays: reader.integer('RETENTION_DAYS', 30),
     jwtSecret: reader.required('JWT_SECRET'),
     jwtExpiresInSeconds: reader.integer('JWT_EXPIRES_IN_SECONDS', 3_600),
     authProvider,

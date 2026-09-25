@@ -33,16 +33,35 @@ export async function iniciarPapel(
     case 'relay':
       await app.init();
       app.get(RelayWorker).start();
-      logger.log('Papel relay ativo');
+      await exporWorker(app, env, logger, 'relay');
       return;
     case 'consumer':
       await app.init();
       await app.get(ConsumerWorker).start();
-      logger.log('Papel consumer ativo');
+      await exporWorker(app, env, logger, 'consumer');
       return;
     default:
       throw new Error(`Papel desconhecido: ${String(env.appRole)}`);
   }
+}
+
+/**
+ * Relay e consumer também escutam HTTP — não para servir a API, mas porque
+ * `/metrics` e `/health` vivem no processo que tem os números. Sem isto, a
+ * gauge da outbox só existiria dentro do relay, e o `/metrics` da API
+ * publicaria zero para sempre: pior que métrica nenhuma.
+ */
+export async function exporWorker(
+  app: INestApplication,
+  env: Env,
+  logger: StructuredLogger,
+  papel: string,
+): Promise<void> {
+  await app.listen(env.httpPort);
+  logger.log(`Papel ${papel} ativo`, {
+    porta: env.httpPort,
+    metrics: `http://localhost:${env.httpPort}/metrics`,
+  });
 }
 
 export async function startApi(app: INestApplication, env: Env, logger: StructuredLogger): Promise<void> {

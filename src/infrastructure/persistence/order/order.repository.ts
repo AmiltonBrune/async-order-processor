@@ -16,6 +16,7 @@ export class TypeOrmOrderRepository implements OrderRepository {
     await this.runner.manager.getRepository(OrderEntity).insert({
       id: order.id,
       customerName: order.customerName,
+      createdBy: order.createdBy,
       status: order.status,
       totalAmount: order.total,
       currency: order.total.currency,
@@ -47,7 +48,10 @@ export class TypeOrmOrderRepository implements OrderRepository {
 
   async list(filter: ListOrdersFilter): Promise<Page<Order>> {
     const [rows, total] = await this.runner.manager.getRepository(OrderEntity).findAndCount({
-      where: filter.status === undefined ? {} : { status: filter.status },
+      where: {
+        ...(filter.status === undefined ? {} : { status: filter.status }),
+        ...(filter.createdBy === undefined ? {} : { createdBy: filter.createdBy }),
+      },
       order: { createdAt: 'DESC', id: 'DESC' },
       skip: (filter.page - 1) * filter.limit,
       take: filter.limit,
@@ -85,6 +89,7 @@ export class TypeOrmOrderRepository implements OrderRepository {
     return Order.restore({
       id: row.id,
       customerName: row.customerName,
+      createdBy: row.createdBy,
       status: row.status,
       total: row.totalAmount,
       items: items

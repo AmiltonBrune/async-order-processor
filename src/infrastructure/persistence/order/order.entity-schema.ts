@@ -7,6 +7,7 @@ import { moneyTransformer } from '../../../shared/transformers';
 export interface OrderRow {
   id: string;
   customerName: string;
+  createdBy: string;
   status: OrderStatus;
   totalAmount: Money;
   currency: string;
@@ -25,6 +26,7 @@ export const OrderEntity = new EntitySchema<OrderRow>({
   columns: {
     id: { type: 'char', length: 36, primary: true },
     customerName: { type: 'varchar', length: 160, name: 'customer_name' },
+    createdBy: { type: 'varchar', length: 160, name: 'created_by' },
     status: { type: 'enum', enum: OrderStatus },
     totalAmount: {
       type: 'decimal',

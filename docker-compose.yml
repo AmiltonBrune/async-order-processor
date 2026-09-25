@@ -76,22 +76,40 @@ services:
     environment:
       <<: *app-env
       APP_ROLE: relay
+      HTTP_PORT: "3000"
+    # Porta propria: o relay serve /metrics e /health, nao a API. A gauge da
+    # outbox so existe neste processo, que e quem a alimenta.
+    ports: ["${RELAY_METRICS_PORT:-3001}:3000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   consumer:
     build: .
     environment:
       <<: *app-env
       APP_ROLE: consumer
+      HTTP_PORT: "3000"
     # Escala horizontal: `docker compose up -d --scale consumer=3` e o teste de
     # que a protecao contra overselling nao depende de haver um worker so.
     deploy:
       replicas: ${CONSUMER_REPLICAS:-1}
+    # Sem porta publicada de proposito: com replicas > 1 um mapeamento fixo
+    # colidiria. O Prometheus alcanca cada replica pela rede do compose, em
+    # consumer:3000/metrics.
     depends_on:
       migrate: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   mysql-data:

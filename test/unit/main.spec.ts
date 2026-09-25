@@ -75,6 +75,7 @@ describe('bootstrap', () => {
       useLogger: jest.fn(),
       enableShutdownHooks: jest.fn(),
       init: jest.fn(async () => undefined),
+      listen: jest.fn(async () => undefined),
     };
     jest.doMock('@nestjs/core', () => ({
       NestFactory: { create: jest.fn(async () => app) },
@@ -90,6 +91,8 @@ describe('bootstrap', () => {
     expect(app.useLogger).toHaveBeenCalledWith(registrado);
     expect(app.enableShutdownHooks).toHaveBeenCalled();
     expect(relay.start).toHaveBeenCalled();
+    // O relay também escuta HTTP: é onde `/metrics` publica a gauge da outbox.
+    expect(app.listen).toHaveBeenCalled();
     jest.dontMock('@nestjs/core');
     jest.resetModules();
   });

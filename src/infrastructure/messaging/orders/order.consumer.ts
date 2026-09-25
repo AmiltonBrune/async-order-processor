@@ -10,6 +10,8 @@ import { RetryPolicy } from '../../../domain/shared/retry-policy';
 
 import { Env } from '../../config/env.schema';
 import { StructuredLogger } from '../../observability/pino.logger';
+import { METRICS } from '../../observability/metrics.constants';
+import { PrometheusMetrics } from '../../observability/prometheus.metrics';
 import { CorrelationContext } from '../../observability/correlation.context';
 import { asTransientIfRetryable } from '../../persistence/errors/mysql.errors';
 import { AmqpConnection } from '../amqp/amqp.connection';
@@ -28,6 +30,7 @@ export class OrderConsumer {
     private readonly processOrder: ProcessOrderUseCase,
     @Inject(ENV) private readonly env: Env,
     @Inject(LOGGER) private readonly logger: StructuredLogger,
+    @Inject(METRICS) private readonly metrics: PrometheusMetrics,
   ) {
     this.retryPolicy = new RetryPolicy(env.retryTiersMs);
   }
@@ -96,6 +99,7 @@ export class OrderConsumer {
         } else {
           this.logger.log('Mensagem processada', { resultado: outcome, tentativa: decoded.attempt });
         }
+        this.metrics.contarProcessamento(outcome);
         channel.ack(message);
       } catch (error) {
         await this.onFailure(error, decoded, message);

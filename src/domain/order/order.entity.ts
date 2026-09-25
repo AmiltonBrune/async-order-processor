@@ -7,6 +7,8 @@ import { calculateOrderTotal } from './order-total.calculator';
 export interface OrderSnapshot {
   readonly id: string;
   readonly customerName: string;
+  /** Identidade autenticada que criou o pedido — é por ela que a listagem filtra. */
+  readonly createdBy: string;
   readonly status: OrderStatus;
   readonly total: Money;
   readonly items: readonly OrderItem[];
@@ -22,6 +24,7 @@ export class Order {
   private constructor(
     readonly id: string,
     readonly customerName: string,
+    readonly createdBy: string,
     private currentStatus: OrderStatus,
     readonly total: Money,
     readonly items: readonly OrderItem[],
@@ -36,6 +39,7 @@ export class Order {
   static create(input: {
     id: string;
     customerName: string;
+    createdBy: string;
     items: readonly OrderItem[];
     correlationId: string;
     now: Date;
@@ -49,6 +53,7 @@ export class Order {
     return new Order(
       input.id,
       input.customerName,
+      input.createdBy,
       OrderStatus.PENDING,
       calculateOrderTotal(input.items),
       input.items,
@@ -65,6 +70,7 @@ export class Order {
     return new Order(
       snapshot.id,
       snapshot.customerName,
+      snapshot.createdBy,
       snapshot.status,
       snapshot.total,
       snapshot.items,

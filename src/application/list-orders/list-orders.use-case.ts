@@ -13,8 +13,15 @@ export interface ListOrdersResult {
 export class ListOrdersUseCase {
   constructor(@Inject(ORDER_REPOSITORY) private readonly orders: OrderRepository) {}
 
-  async execute(query: ListOrdersQuery): Promise<ListOrdersResult> {
-    const { data, total } = await this.orders.list(query);
+  /**
+   * `escopo` é obrigatório de propósito: `null` significa "todos os pedidos" e é
+   * uma decisão explícita de quem chama. Ver `GetOrderUseCase`.
+   */
+  async execute(query: ListOrdersQuery, escopo: string | null): Promise<ListOrdersResult> {
+    const { data, total } = await this.orders.list({
+      ...query,
+      ...(escopo === null ? {} : { createdBy: escopo }),
+    });
     return { data, meta: ListOrdersUseCase.metaOf(query, total) };
   }
 

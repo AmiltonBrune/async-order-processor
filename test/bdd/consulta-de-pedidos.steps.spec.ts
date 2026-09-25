@@ -211,4 +211,73 @@ defineFeature(feature, (test) => {
       },
     );
   });
+
+  // Isolamento por dono. O "operador" é a outra identidade semeada pela
+  // migration — o que importa é que o subject do token difere.
+  const criarComoOperador = async (quantidade: number): Promise<string> => {
+    await ctx.autenticar('ADMIN');
+    let ultimo = '';
+    for (let i = 0; i < quantidade; i += 1) {
+      ultimo = await ctx.criarPedido(`Operador ${i}`, [{ produto: 'Teclado', quantidade: '1' }]);
+    }
+    await ctx.autenticar('CUSTOMER');
+    return ultimo;
+  };
+
+  test('Cliente não enxerga pedido criado por outra identidade', ({ given, when, then, and }) => {
+    autenticado(given);
+
+    let doOperador = '';
+    given(/^um pedido criado pelo operador$/, async () => {
+      doOperador = await criarComoOperador(1);
+    });
+    when(/^eu envio "GET \/orders\/\{id\}" para esse pedido$/, async () => {
+      await ctx.get(`/orders/${doOperador}`);
+    });
+    then(/^a resposta tem status (\d+)$/, (status: string) => {
+      expect(ctx.resposta?.status).toBe(Number(status));
+    });
+    and(/^o campo "code" do corpo de erro é "(.*)"$/, (code: string) => {
+      expect((ctx.resposta?.body as { code?: string }).code).toBe(code);
+    });
+  });
+
+  test('A listagem mostra só os pedidos de quem pediu', ({ given, and, when, then }) => {
+    autenticado(given);
+
+    and(/^(\d+) pedidos meus e (\d+) criados pelo operador$/, async (meus: string, deles: string) => {
+      await criarComoOperador(Number(deles));
+      await criarLote(Number(meus));
+    });
+    when(/^eu envio "GET (.*)"$/, async (rota: string) => {
+      await ctx.get(rota);
+    });
+    then(/^a lista tem (\d+) itens$/, (quantidade: string) => {
+      expect((ctx.resposta?.body as CorpoLista).data).toHaveLength(Number(quantidade));
+    });
+    and(/^"meta.total" é (\d+)$/, (total: string) => {
+      expect((ctx.resposta?.body as CorpoLista).meta.total).toBe(Number(total));
+    });
+  });
+
+  test('O operador ADMIN enxerga os pedidos de todos', ({ given, and, when, then }) => {
+    autenticado(given);
+
+    and(/^(\d+) pedidos meus e (\d+) criados pelo operador$/, async (meus: string, deles: string) => {
+      await criarComoOperador(Number(deles));
+      await criarLote(Number(meus));
+    });
+    and(/^que me autentico como "(.*)"$/, async (papel: string) => {
+      await ctx.autenticar(papel);
+    });
+    when(/^eu envio "GET (.*)"$/, async (rota: string) => {
+      await ctx.get(rota);
+    });
+    then(/^a lista tem (\d+) itens$/, (quantidade: string) => {
+      expect((ctx.resposta?.body as CorpoLista).data).toHaveLength(Number(quantidade));
+    });
+    and(/^"meta.total" é (\d+)$/, (total: string) => {
+      expect((ctx.resposta?.body as CorpoLista).meta.total).toBe(Number(total));
+    });
+  });
 });

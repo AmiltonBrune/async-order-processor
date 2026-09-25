@@ -88,3 +88,26 @@ Funcionalidade: Consulta de pedidos
     Quando eu envio "GET /orders"
     Então a resposta tem status 200
     E "meta" é: page 1, limit 20, total 12, totalPages 1
+
+  @seguranca @isolamento
+  Cenário: Cliente não enxerga pedido criado por outra identidade
+    Dado um pedido criado pelo operador
+    Quando eu envio "GET /orders/{id}" para esse pedido
+    Então a resposta tem status 404
+    E o campo "code" do corpo de erro é "ORDER_NOT_FOUND"
+
+  @seguranca @isolamento
+  Cenário: A listagem mostra só os pedidos de quem pediu
+    Dado 2 pedidos meus e 3 criados pelo operador
+    Quando eu envio "GET /orders?page=1&limit=50"
+    Então a lista tem 2 itens
+    E "meta.total" é 2
+
+  @seguranca @isolamento
+  Cenário: O operador ADMIN enxerga os pedidos de todos
+    Dado 2 pedidos meus e 3 criados pelo operador
+    E que me autentico como "ADMIN"
+    Quando eu envio "GET /orders?page=1&limit=50"
+    Então a lista tem 5 itens
+    E "meta.total" é 5
+

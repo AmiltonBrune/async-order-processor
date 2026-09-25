@@ -6,7 +6,9 @@ import { ORDER_REPOSITORY } from '../../domain/ports/repositories/order.reposito
 import { USER_REPOSITORY } from '../../domain/ports/repositories/user.repository.port';
 import { UNIT_OF_WORK } from '../../domain/ports/unit-of-work.port';
 import { Env } from '../config/env.schema';
+import { InboxRetentionRepository } from './inbox/inbox-retention.repository';
 import { OutboxDispatchRepository } from './outbox/outbox-dispatch.repository';
+import { OutboxRetentionRepository } from './outbox/outbox-retention.repository';
 import { TypeOrmOrderRepository } from './order/order.repository';
 import { TypeOrmUnitOfWork } from './unit-of-work/typeorm.unit-of-work';
 import { TypeOrmUserRepository } from './user/user.repository';
@@ -40,8 +42,26 @@ import { dataSourceOptions } from './datasource/typeorm.datasource';
       inject: [DataSource],
       useFactory: (ds: DataSource) => new OutboxDispatchRepository(ds),
     },
+    {
+      provide: OutboxRetentionRepository,
+      inject: [DataSource],
+      useFactory: (ds: DataSource) => new OutboxRetentionRepository(ds),
+    },
+    {
+      provide: InboxRetentionRepository,
+      inject: [DataSource],
+      useFactory: (ds: DataSource) => new InboxRetentionRepository(ds),
+    },
   ],
-  exports: [DataSource, UNIT_OF_WORK, ORDER_REPOSITORY, USER_REPOSITORY, OutboxDispatchRepository],
+  exports: [
+    DataSource,
+    UNIT_OF_WORK,
+    ORDER_REPOSITORY,
+    USER_REPOSITORY,
+    OutboxDispatchRepository,
+    OutboxRetentionRepository,
+    InboxRetentionRepository,
+  ],
 })
 export class PersistenceModule implements OnApplicationShutdown {
   constructor(private readonly dataSource: DataSource) {}

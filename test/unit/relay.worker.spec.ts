@@ -1,4 +1,5 @@
 import { Env } from '../../src/infrastructure/config/env.schema';
+import { PrometheusMetrics } from '../../src/infrastructure/observability/prometheus.metrics';
 import { StructuredLogger } from '../../src/infrastructure/observability/pino.logger';
 import { PendingMessage } from '../../src/infrastructure/persistence/outbox/outbox-dispatch.repository';
 import { RelayWorker } from '../../src/workers/relay/relay.worker';
@@ -18,22 +19,31 @@ const montar = (lotes: PendingMessage[][] = [[]]) => {
     claimBatch: jest.fn(async () => lotes[Math.min(ciclo++, lotes.length - 1)] ?? []),
     markPublished: jest.fn(async () => undefined),
     markRetry: jest.fn(async () => undefined),
+    pendingStats: jest.fn(async () => ({ pendentes: 0, idadeDaMaisAntigaSegundos: 0 })),
   };
   const publisher = { publishCreated: jest.fn(async () => undefined) };
+  const outboxRetention = { purgePublishedBefore: jest.fn(async (_corte: Date) => 0) };
+  const inboxRetention = { purgeProcessedBefore: jest.fn(async (_corte: Date) => 0) };
   const env = {
     outboxBatchSize: 50,
     outboxPollIntervalMs: 5,
     maxPublishAttempts: 10,
+    retentionDays: 30,
   } as unknown as Env;
   return {
     outbox,
     publisher,
+    outboxRetention,
+    inboxRetention,
     worker: new RelayWorker(
       outbox as never,
+      outboxRetention as never,
+      inboxRetention as never,
       publisher as never,
       new FixedClock(),
       env,
       new StructuredLogger('silent', 'test'),
+      new PrometheusMetrics('relay'),
     ),
   };
 };
@@ -123,5 +133,57 @@ describe('RelayWorker', () => {
 
     // Um erro no ciclo não pode matar o relay: ele registra e tenta de novo.
     expect(outbox.claimBatch.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  describe('expurgo de histórico', () => {
+    it('corta pelo prazo de retenção configurado', async () => {
+      const { worker, outboxRetention, inboxRetention } = montar([[]]);
+
+      await worker.expurgarSeChegouAHora();
+
+      const esperado = new FixedClock().now().getTime() - 30 * 24 * 60 * 60 * 1000;
+      expect(outboxRetention.purgePublishedBefore).toHaveBeenCalledWith(new Date(esperado));
+      expect(inboxRetention.purgeProcessedBefore).toHaveBeenCalledWith(new Date(esperado));
+    });
+
+    // A cada 500 ms o expurgo viraria carga constante no banco em vez de
+    // limpeza de rotina. O relógio é fixo no teste, então a segunda chamada
+    // acontece "no mesmo instante" — e tem que ser ignorada.
+    // Sem apagar nada, o relay fica calado: uma linha por hora dizendo "0 e 0"
+    // é ruído que treina quem opera a ignorar o log do expurgo.
+    it('registra uma linha só quando houve o que apagar', async () => {
+      const { worker, outboxRetention, inboxRetention } = montar([[]]);
+      outboxRetention.purgePublishedBefore.mockResolvedValueOnce(7);
+      inboxRetention.purgeProcessedBefore.mockResolvedValueOnce(3);
+      const log = jest.spyOn(StructuredLogger.prototype, 'log').mockImplementation(() => undefined);
+
+      await worker.expurgarSeChegouAHora();
+
+      expect(log).toHaveBeenCalledWith(
+        'Expurgo de histórico concluído',
+        expect.objectContaining({ outbox: 7, inbox: 3 }),
+      );
+      log.mockRestore();
+    });
+
+    it('não registra nada quando não havia o que apagar', async () => {
+      const { worker } = montar([[]]);
+      const log = jest.spyOn(StructuredLogger.prototype, 'log').mockImplementation(() => undefined);
+
+      await worker.expurgarSeChegouAHora();
+
+      expect(log).not.toHaveBeenCalledWith('Expurgo de histórico concluído', expect.anything());
+      log.mockRestore();
+    });
+
+    it('não repete antes da hora', async () => {
+      const { worker, outboxRetention } = montar([[]]);
+
+      await worker.expurgarSeChegouAHora();
+      await worker.expurgarSeChegouAHora();
+      await worker.expurgarSeChegouAHora();
+
+      expect(outboxRetention.purgePublishedBefore).toHaveBeenCalledTimes(1);
+    });
   });
 });
